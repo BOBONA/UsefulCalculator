@@ -26,10 +26,10 @@ static const std::vector<std::string> operandKeys = getMapKeys(operands);
 enum OpType {
     Operator,
     Postfix,
-    Function,
+    OFunction,
     ParenthesesL,
     ParenthesesR,
-    Operand
+    OOther
 };
 
 typedef std::vector<double> args;
@@ -38,7 +38,7 @@ struct CalcOperator {
     std::function<double(args)> function;
     int precedence;
     int argumentCount;
-    OpType optype;
+    OpType type;
 };
 
 static std::pair<std::string, CalcOperator> basicPostfix(std::string name, std::function<double(args)> function) {
@@ -46,7 +46,7 @@ static std::pair<std::string, CalcOperator> basicPostfix(std::string name, std::
 }
 
 static std::pair<std::string, CalcOperator> basicFunction(std::string name, std::function<double(args)> function) {
-    return { name, CalcOperator{function, 0, 1, OpType::Function} };
+    return { name, CalcOperator{function, 0, 1, OpType::OFunction} };
 }
 
 static std::pair<std::string, CalcOperator> basicOperator(std::string name, int precedence, std::function<double(args)> function) {
@@ -86,6 +86,19 @@ int Calculator::LineCount() {
     return inputs.size();
 }
 
+// postfix operators get treated differently anyways
+bool isOperator(OpType& type) {
+    return type == OpType::OFunction || type == OpType::Operator;
+}
+
+bool isOperand(ItemType& type) {
+    return type == ItemType::Variable || type == ItemType::Operand || type == ItemType::OperandSymbol;
+}
+
+bool isFunction(ItemType& type) {
+    return type == ItemType::Function || type == ItemType::UserFunction;
+}
+
 std::string Calculator::GetFormattedLine(int index) { 
     InputLine line = *inputs.at(index);
     std::string output{ "" };
@@ -107,9 +120,8 @@ std::string Calculator::GetFormattedLine(int index) {
     }
     for (PostfixItem item : line.postfix) {
         switch (item.type) {
-        case ItemType::IFunction:
+        case ItemType::Function:
         case ItemType::Variable:
-        case ItemType::IOperator:
         case ItemType::UserFunction:
             output += item.name;
             break;
@@ -240,12 +252,13 @@ void Calculator::ParseLine(const std::string& str, int lineIndex) {
     for (unsigned i{ 0 }; i < righthand.length(); i++) {
         char it = righthand.at(i);
         // first have to identify the next token in the string
-        if (iswspace(it)) {
+        if (iswspace(it) || it == ',') {
             continue;
         }
         PostfixItem item{};
         item.type = ItemType::Other;
         CalcOperator op{};
+        op.type = OpType::OOther;
         if (isdigit(it) || it == '.') { // parse number if there is one
             double operand{ 0 };
             bool leftside{ true };
@@ -272,15 +285,14 @@ void Calculator::ParseLine(const std::string& str, int lineIndex) {
             }
             i--;
             item.type = ItemType::Operand;
-            op.optype = OpType::Operand;
             item.value = operand;
         } else if (it == '(') {
             item.name = '(';
-            op.optype = OpType::ParenthesesL;
+            op.type = OpType::ParenthesesL;
             parenLCount++;
         } else if (it == ')') {
             item.name = ')';
-            op.optype = OpType::ParenthesesR;
+            op.type = OpType::ParenthesesR;
             parenRCount++;
         } else {
             // try to match existing operators to string
@@ -292,21 +304,16 @@ void Calculator::ParseLine(const std::string& str, int lineIndex) {
             std::string matchedUserFunction = matchToString(righthand, i, getMapKeys(functions));
             if (matchedOperator != "") {
                 op = operators.at(matchedOperator);
-                if (op.optype == OpType::Function || op.optype == OpType::Postfix) {
-                    item.type = ItemType::IFunction;
-                } else if (op.optype == OpType::Operator) {
-                    item.type = ItemType::IOperator;
-                }
+                item.type = ItemType::Function;
                 item.name = matchedOperator;
             } else if (matchedOperand != "") {
                 item.type = ItemType::OperandSymbol;
-                op.optype = OpType::Operand;
                 item.value = operands.at(matchedOperand);
             } else if (matchedVariable != "") {
                 item.type = ItemType::Variable;
-                op.optype = OpType::Operand;
                 item.name = matchedVariable;
             } else if (matchedUserFunction != "") {
+                op.type = OpType::OFunction;
                 item.type = ItemType::UserFunction;
                 item.name = matchedUserFunction;
             } else {
@@ -323,14 +330,14 @@ void Calculator::ParseLine(const std::string& str, int lineIndex) {
     }
     // add * when necessary (like 5x = 5*x)
     for (size_t i{ 1 }; i < items.size(); ++i) {
-        if (items[i].type != ItemType::IOperator &&
-            items[i].type != ItemType::Operand &&
-            ops[i].optype != OpType::Postfix &&
-            ops[i].optype != OpType::ParenthesesR &&
-            items[i - 1].type != ItemType::IOperator &&
-            ops[i - 1].optype != OpType::ParenthesesL) {
+        if ((items[i].type == ItemType::OperandSymbol ||
+            items[i].type == ItemType::Variable ||
+            ops[i].type == OpType::ParenthesesL ||
+            ops[i].type == OpType::OFunction) &&
+            (isOperand(items[i-1].type) ||
+            ops[i-1].type == OpType::ParenthesesR)) {
 
-            items.insert(items.begin() + i, PostfixItem{ItemType::IOperator, "*", 0});
+            items.insert(items.begin() + i, PostfixItem{ItemType::Function, "*", 0});
             ops.insert(ops.begin() + i, operators.at("*"));
             ++i;
         }
@@ -339,30 +346,24 @@ void Calculator::ParseLine(const std::string& str, int lineIndex) {
         PostfixItem item = items[i];
         CalcOperator op = ops[i];
         // finally use shunting yard procedure
-
-        if (item.type == ItemType::Operand || item.type == ItemType::Variable || item.type == ItemType::OperandSymbol) {
+        if (isOperand(item.type)) {
             output.push_back(item);
-        } else if (item.type == ItemType::UserFunction) {
-            stack.push_back(item);
-        } else {
-            switch (op.optype) {
-            case OpType::Postfix:
+        } else if (isFunction(item.type)) {
+            if (op.type == OpType::Postfix) {
                 output.push_back(item);
-                break;
-            case OpType::Function:
-                stack.push_back(item);
-                break;
-            case OpType::Operator:
-                while (!stack.empty() && (stack.back().type == ItemType::IOperator || stack.back().type == ItemType::IFunction) && operators.at(stack.back().name).precedence >= op.precedence) {
+            } else if (isOperator(op.type)) {
+                while (!stack.empty() && 
+                    ((stack.back().type == ItemType::Function && operators.at(stack.back().name).precedence >= op.precedence) 
+                    || stack.back().type == ItemType::UserFunction)) {
                     output.push_back(stack.back());
                     stack.pop_back();
                 }
                 stack.push_back(item);
-                break;
-            case OpType::ParenthesesL:
+            }
+        } else {
+            if (op.type == OpType::ParenthesesL) {
                 stack.push_back(item);
-                break;
-            case OpType::ParenthesesR:
+            } else if (op.type == OpType::ParenthesesR) {
                 while (!stack.empty() && stack.back().name[0] != '(') {
                     output.push_back(stack.back());
                     stack.pop_back();
@@ -370,13 +371,9 @@ void Calculator::ParseLine(const std::string& str, int lineIndex) {
                 if (!stack.empty()) {
                     stack.pop_back();
                 }
-                if (!stack.empty() && (stack.back().type == ItemType::IFunction || stack.back().type == ItemType::UserFunction)) {
-                    output.push_back(stack.back());
-                    stack.pop_back();
-                }
-                break;
             }
         }
+
     }
     while (!stack.empty()) {
         output.push_back(stack.back());

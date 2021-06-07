@@ -9,8 +9,7 @@ enum ItemType {
     Operand,
     OperandSymbol,
     Variable,
-    IOperator,
-    IFunction,
+    Function,
     UserFunction,
     Other
 };
