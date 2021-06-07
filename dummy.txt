@@ -1,0 +1,14 @@
+Allows more than 30Kb of text
+(on all Windows versions)
+and a very very very very very very very very long line to test wxHSCROLL style
+
+And here is a link in quotation marks to test wxTE_AUTO_URL: "http://www.wxwidgets.org"
+
+First 10 characters should be in red
+Next 10 characters should be in blue
+Next 10 characters should be normal
+And the next 10 characters should be green and italic
+This text should be cyan on blue
+And this should be in blue and the text you type should be in blue as well.
+
+And there is a mispeled word.
