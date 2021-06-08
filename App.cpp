@@ -61,7 +61,8 @@ void AddInput(bool insert, bool removeOption, int insertIndex = 0) {
     } else {
         sizer->Add(container, wxSizerFlags().Expand())->SetId(inputID);
     }
-    calc->AddLine();
+    wxLogDebug("%d", insertIndex);
+    calc->AddLine(insertIndex);
 }
 
 void OnAddInputPressed(wxCommandEvent& event) {

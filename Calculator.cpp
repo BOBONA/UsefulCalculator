@@ -67,11 +67,21 @@ static const std::map<std::string, CalcOperator> operators = {
 
 static const std::vector<std::string> operatorKeys = getMapKeys(operators);
 
-void Calculator::AddLine() {
-    inputs.push_back(new InputLine{});
+void Calculator::AddLine(int index) {
+    if (index <= evaluateLine) {
+        evaluateLine++;
+    }
+    inputs.insert(inputs.begin() + index, new InputLine{});
+}
+
+void Calculator::SetEvaluateLine(int line) {
+    evaluateLine = line;
 }
 
 void Calculator::RemoveLine(int index) {
+    if (index == evaluateLine) {
+        evaluateLine = Last;
+    }
     InputLine* input = inputs.at(index);
     if (input->type == InputLineType::ILVariable) {
         variables.erase(input->identifier);
@@ -118,7 +128,8 @@ std::string Calculator::GetFormattedLine(int index) {
         output += Calculator::Assignment;
         output += " ";
     }
-    for (PostfixItem item : line.postfix) {
+    std::set<std::string> temp{};
+    for (PostfixItem item : GetExpandedFunctionsPostfix(line.postfix, temp)) {
         switch (item.type) {
         case ItemType::Function:
         case ItemType::Variable:
@@ -177,8 +188,16 @@ std::string matchToString(const std::string& str, int index, std::vector<std::st
 }
 
 void Calculator::ParseLine(const std::string& str, int lineIndex) {
-    InputLine line{};
+    // update references of old line
+    InputLine& previous = *inputs.at(lineIndex);
+    previous.failed = true;
+    if (previous.type == InputLineType::ILVariable) {
+        variables.erase(previous.identifier);
+    } else if (previous.type == InputLineType::ILFunction) {
+        functions.erase(previous.identifier);
+    }
     // parse left hand of = sign
+    InputLine line{};
     int assignment = str.find(Calculator::Assignment);
     if (assignment != std::string::npos) {
         std::string id = str.substr(0, assignment);
@@ -236,6 +255,17 @@ void Calculator::ParseLine(const std::string& str, int lineIndex) {
     } else {
         line.type = InputLineType::Expression;
     }
+    // update references even if the left hand side might not be valid
+    if (variables.find(line.identifier) != variables.end() || functions.find(line.identifier) != functions.end()) {
+        plError(line.identifier + " cannot be defined twice");
+    }
+    if (line.type == InputLineType::ILVariable) {
+        variables[line.identifier] = NaN;
+    } else if (line.type == InputLineType::ILFunction) {
+        functions[line.identifier] = lineIndex;
+    }
+    // store the incompletion state
+    previous.source = str;
     // parse the righthand side of the equation
     std::string righthand;
     if (assignment == std::string::npos) {
@@ -379,20 +409,62 @@ void Calculator::ParseLine(const std::string& str, int lineIndex) {
         output.push_back(stack.back());
         stack.pop_back();
     }
-    InputLine& previous = *inputs.at(lineIndex);
-    if (previous.type == InputLineType::ILVariable) {
-        variables.erase(previous.identifier);
-    } else if (previous.type == InputLineType::ILFunction) {
-        variables.erase(previous.identifier);
-    }
     previous = line;
-    if (line.type == InputLineType::ILVariable) {
-        variables[line.identifier] = NaN;
-    } else if (line.type == InputLineType::ILFunction) {
-        functions[line.identifier] = lineIndex;
+    previous.failed = false;
+    previous.source = "";
+}
+
+// todo fix functions updating once they become valid
+std::deque<PostfixItem> Calculator::GetExpandedFunctionsPostfix(std::deque<PostfixItem> items, std::set<std::string>& processed) {
+    size_t i{ 0 };
+    while (i < items.size()) { // replace all the user functions with their expanded forms
+        auto item = items[i];
+        if (item.type == ItemType::UserFunction) {
+            if (functions.find(item.name) == functions.end()) {
+                plError(item.name + " isn't well defined");
+            }
+            auto& function = *inputs[functions[item.name]];
+            auto pCount = function.arguments.size();
+            if (i < pCount) {
+                plError("Missing arguments");
+            }
+            if (processed.find(function.identifier) != processed.end()) {
+                plError("Recursion detected");
+            }
+            processed.insert(function.identifier);
+            // attempt to reparse the function if it's previously failed, like if you define a variable after a function uses it
+            if (function.failed) {
+                ParseLine(function.source, functions[item.name]);
+            }
+            auto processedCopy = processed; // necessary for the recursion detecting to work properly, thinking of the "call stack" as a tree, each vertice should only have a list of its parents
+            auto subItems = GetExpandedFunctionsPostfix(function.postfix, processedCopy);
+            // replace parameters
+            int j{ 0 };
+            while (items[i + j - pCount].type != ItemType::UserFunction) {
+                for (PostfixItem& item : subItems) {
+                    if (item.name == function.arguments[j]) {
+                        item = items[i + j - pCount];
+                    }
+                }
+                ++j;
+            }
+            // wow this looks disgusting
+            items.insert(items.begin() + i + 1, subItems.begin(), subItems.end());
+            items.erase(items.begin() + i - pCount, items.begin() + i + 1);
+            i += subItems.size() - (pCount + 1);
+        }
+        ++i;
     }
+    return items;
 }
 
 double Calculator::Evaluate() {
+    InputLine line;
+    if (evaluateLine == Last) {
+        line = *inputs.back();
+    } else {
+        line = *inputs[evaluateLine];
+    }
+    
     return 0;
 }
