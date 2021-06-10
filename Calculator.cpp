@@ -480,8 +480,9 @@ double Calculator::EvaluatePostfix(std::deque<PostfixItem> items, std::set<std::
                 if (inputs[variables[item.name]]->failed) {
                     ParseLine(inputs[variables[item.name]]->source, variables[item.name]);
                 }
-                calculatedVariables[item.name] = EvaluatePostfix(inputs[variables[item.name]]->postfix);
-                processedIdentifiers.insert(item.name); 
+                std::set<std::string> copy = processedIdentifiers;
+                copy.insert(item.name);
+                calculatedVariables[item.name] = EvaluatePostfix(inputs[variables[item.name]]->postfix, copy, calculatedVariables);
             }
             item.type = ItemType::Operand;
             item.value = calculatedVariables.at(item.name);
