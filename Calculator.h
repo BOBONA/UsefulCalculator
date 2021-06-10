@@ -42,7 +42,7 @@ private:
     static const char Assignment = '=';
     static const int Last = -1;
 
-    std::map<std::string, double> variables; // user variables with their calculated values or NaN if not calculated
+    std::map<std::string, int> variables; // user variables with their associated input
     std::map<std::string, int> functions; // user functions with their associated input
     std::vector<InputLine*> inputs;
     int evaluateLine = Last;
@@ -53,9 +53,11 @@ public:
     int LineCount();
     std::string GetFormattedLine(int index);
     void ParseLine(const std::string& line, int index);
-    double Evaluate();
+    double EvaluatePostfix(std::deque<PostfixItem> items);
+    double EvaluatePostfix(std::deque<PostfixItem> items, std::set<std::string>& processedIdentifiers, std::map<std::string, double>& calculatedVariables);
     void SetEvaluateLine(int index);
-    std::deque<PostfixItem> GetExpandedFunctionsPostfix(std::deque<PostfixItem> items, std::set<std::string>& processed);
+    std::deque<PostfixItem> GetExpandedPostfix(std::deque<PostfixItem> items);
+    std::deque<PostfixItem> GetExpandedPostfix(std::deque<PostfixItem> items, std::set<std::string>& processed);
 
     ~Calculator() {
         while (LineCount() != 0) {

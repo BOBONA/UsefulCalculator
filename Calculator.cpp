@@ -111,6 +111,9 @@ bool isFunction(ItemType& type) {
 
 std::string Calculator::GetFormattedLine(int index) { 
     InputLine line = *inputs.at(index);
+    if (line.type == InputLineType::Expression) {
+        return std::to_string(EvaluatePostfix(line.postfix));
+    }
     std::string output{ "" };
     if (line.type != InputLineType::Expression) {
         output += line.identifier;
@@ -129,7 +132,7 @@ std::string Calculator::GetFormattedLine(int index) {
         output += " ";
     }
     std::set<std::string> temp{};
-    for (PostfixItem item : GetExpandedFunctionsPostfix(line.postfix, temp)) {
+    for (PostfixItem item : GetExpandedPostfix(line.postfix, temp)) {
         switch (item.type) {
         case ItemType::Function:
         case ItemType::Variable:
@@ -260,7 +263,7 @@ void Calculator::ParseLine(const std::string& str, int lineIndex) {
         plError(line.identifier + " cannot be defined twice");
     }
     if (line.type == InputLineType::ILVariable) {
-        variables[line.identifier] = NaN;
+        variables[line.identifier] = lineIndex;
     } else if (line.type == InputLineType::ILFunction) {
         functions[line.identifier] = lineIndex;
     }
@@ -414,8 +417,7 @@ void Calculator::ParseLine(const std::string& str, int lineIndex) {
     previous.source = "";
 }
 
-// todo fix functions updating once they become valid
-std::deque<PostfixItem> Calculator::GetExpandedFunctionsPostfix(std::deque<PostfixItem> items, std::set<std::string>& processed) {
+std::deque<PostfixItem> Calculator::GetExpandedPostfix(std::deque<PostfixItem> items, std::set<std::string>& processed) {
     size_t i{ 0 };
     while (i < items.size()) { // replace all the user functions with their expanded forms
         auto item = items[i];
@@ -431,13 +433,13 @@ std::deque<PostfixItem> Calculator::GetExpandedFunctionsPostfix(std::deque<Postf
             if (processed.find(function.identifier) != processed.end()) {
                 plError("Recursion detected");
             }
-            processed.insert(function.identifier);
             // attempt to reparse the function if it's previously failed, like if you define a variable after a function uses it
             if (function.failed) {
                 ParseLine(function.source, functions[item.name]);
             }
             auto processedCopy = processed; // necessary for the recursion detecting to work properly, thinking of the "call stack" as a tree, each vertice should only have a list of its parents
-            auto subItems = GetExpandedFunctionsPostfix(function.postfix, processedCopy);
+            processedCopy.insert(function.identifier);
+            auto subItems = GetExpandedPostfix(function.postfix, processedCopy);
             // replace parameters
             int j{ 0 };
             while (items[i + j - pCount].type != ItemType::UserFunction) {
@@ -458,13 +460,72 @@ std::deque<PostfixItem> Calculator::GetExpandedFunctionsPostfix(std::deque<Postf
     return items;
 }
 
-double Calculator::Evaluate() {
-    InputLine line;
-    if (evaluateLine == Last) {
-        line = *inputs.back();
-    } else {
-        line = *inputs[evaluateLine];
+std::deque<PostfixItem> Calculator::GetExpandedPostfix(std::deque<PostfixItem> items) {
+    std::set<std::string> temp{};
+    return GetExpandedPostfix(items, temp);
+}
+
+double Calculator::EvaluatePostfix(std::deque<PostfixItem> items, std::set<std::string>& processedIdentifiers, std::map<std::string, double>& calculatedVariables) {
+    std::set<std::string> temp{};
+    items = GetExpandedPostfix(items, temp);
+    for (PostfixItem& item : items) {
+        if (item.type == ItemType::Variable) {
+            if (variables.find(item.name) == variables.end()) {
+                plError(item.name + " isn't well defined");
+            }
+            if (calculatedVariables.find(item.name) == calculatedVariables.end()) {
+                if (processedIdentifiers.find(item.name) != processedIdentifiers.end()) {
+                    plError("Recursion detected with variables");
+                }
+                if (inputs[variables[item.name]]->failed) {
+                    ParseLine(inputs[variables[item.name]]->source, variables[item.name]);
+                }
+                calculatedVariables[item.name] = EvaluatePostfix(inputs[variables[item.name]]->postfix);
+                processedIdentifiers.insert(item.name); 
+            }
+            item.type = ItemType::Operand;
+            item.value = calculatedVariables.at(item.name);
+        }
     }
-    
-    return 0;
+    size_t i{ 0 };
+    while (items.size() > 1 && i < items.size()) {
+        switch (items[i].type) {
+        case ItemType::OperandSymbol:
+            items[i].type = ItemType::Operand;
+            break;
+        case ItemType::Variable:
+        case ItemType::UserFunction:
+        case ItemType::Other:
+            plError("Invalid symbol");
+            break;
+        case ItemType::Function:
+            size_t argCount = operators.at(items[i].name).argumentCount;
+            if (i < argCount) {
+                plError("Wrong number of arguments for an operator/function");
+            }
+            std::vector<double> arguments{};
+            for (size_t j{ i - argCount }; j < i; ++j) {
+                if (items[j].type != ItemType::Operand) {
+                    plError("Wrong number of arguments for an operator/function");
+                }
+                arguments.push_back(items[j].value);
+            }
+            double result = operators.at(items[i].name).function(arguments);
+            items.insert(items.begin() + i + 1, PostfixItem{ ItemType::Operand, "", result });
+            items.erase(items.begin() + i - argCount, items.begin() + i + 1);
+            i -= argCount;
+            break;
+        }
+        ++i;
+    }
+    if (items.size() != 1) {
+        plError("Wrong number of arguments for an operator/function");
+    }
+    return items[0].value;
+}
+
+double Calculator::EvaluatePostfix(std::deque<PostfixItem> items) {
+    std::set<std::string> temp1{};
+    std::map<std::string, double> temp2{};
+    return EvaluatePostfix(items, temp1, temp2);
 }
