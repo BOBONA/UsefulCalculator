@@ -6,6 +6,8 @@
 #include <map>
 #include <set>
 
+#include <mpirxx.h>
+
 enum ItemType {
     Operand,
     OperandSymbol,
@@ -24,7 +26,7 @@ enum InputLineType {
 struct PostfixItem {
     ItemType type;
     std::string name;
-    double value;
+    mpf_class value;
 };
 
 struct InputLine {
@@ -53,8 +55,8 @@ public:
     int LineCount();
     std::string GetFormattedLine(int index);
     void ParseLine(const std::string& line, int index);
-    double EvaluatePostfix(std::deque<PostfixItem> items);
-    double EvaluatePostfix(std::deque<PostfixItem> items, std::set<std::string>& processedIdentifiers, std::map<std::string, double>& calculatedVariables);
+    mpf_class EvaluatePostfix(std::deque<PostfixItem> items);
+    mpf_class EvaluatePostfix(std::deque<PostfixItem> items, std::set<std::string>& processedIdentifiers, std::map<std::string, mpf_class>& calculatedVariables);
     void SetEvaluateLine(int index);
     std::deque<PostfixItem> GetExpandedPostfix(std::deque<PostfixItem> items);
     std::deque<PostfixItem> GetExpandedPostfix(std::deque<PostfixItem> items, std::set<std::string>& processed);

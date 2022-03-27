@@ -21,10 +21,12 @@
   <ItemGroup>
     <ClInclude Include="App.h" />
     <ClInclude Include="Calculator.h" />
+    <ClInclude Include="Math.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="App.cpp" />
     <ClCompile Include="Calculator.cpp" />
+    <ClCompile Include="Math.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>

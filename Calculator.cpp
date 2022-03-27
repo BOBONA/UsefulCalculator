@@ -5,8 +5,9 @@
 #include <limits>
 
 #include "Calculator.h"
+#include "Math.h"
 
-static const double NaN = std::numeric_limits<double>::quiet_NaN();
+mp_exp_t printExp = 1;
 
 template <typename V_T>
 static std::vector<std::string> getMapKeys(std::map<std::string, V_T> map) {
@@ -17,8 +18,10 @@ static std::vector<std::string> getMapKeys(std::map<std::string, V_T> map) {
     return v;
 }
 
-static const std::map<std::string, double> operands = {
-    {"pi", 3.14159265358979323846}
+static const std::map<std::string, mpf_class> operands = {
+    {"pi", 3.14159265358979323846},
+    {"deg", 0.0174533},
+    {"%", 0.01}
 };
 
 static const std::vector<std::string> operandKeys = getMapKeys(operands);
@@ -32,37 +35,47 @@ enum OpType {
     OOther
 };
 
-typedef std::vector<double> args;
+typedef std::vector<mpf_class> args;
 
 struct CalcOperator {
-    std::function<double(args)> function;
+    std::function<mpf_class(args&)> function;
     int precedence;
     int argumentCount;
     OpType type;
 };
 
-static std::pair<std::string, CalcOperator> basicPostfix(std::string name, std::function<double(args)> function) {
+static std::pair<std::string, CalcOperator> basicPostfix(std::string name, std::function<mpf_class(args&)> function) {
     return { name, CalcOperator{function, 1, 1, OpType::Postfix} };
 }
 
-static std::pair<std::string, CalcOperator> basicFunction(std::string name, std::function<double(args)> function) {
+static std::pair<std::string, CalcOperator> basicFunction(std::string name, std::function<mpf_class(args&)> function) {
     return { name, CalcOperator{function, 0, 1, OpType::OFunction} };
 }
 
-static std::pair<std::string, CalcOperator> basicOperator(std::string name, int precedence, std::function<double(args)> function) {
+static std::pair<std::string, CalcOperator> complexFunction(std::string name, int argCount, std::function<mpf_class(args&)> function) {
+    return { name, CalcOperator{function, 0, argCount, OpType::OFunction} };
+}
+
+static std::pair<std::string, CalcOperator> basicOperator(std::string name, int precedence, std::function<mpf_class(args&)> function) {
     return { name, CalcOperator{function, precedence, 2, OpType::Operator} };
 }
 
 static const std::map<std::string, CalcOperator> operators = {
-    basicPostfix("%", [](auto d) { return d[0] / 100; }),
-    basicPostfix("deg", [](auto d) { return d[0] * 0.0174533; }),
-    basicFunction("sqrt", [](auto d) { return std::sqrt(d[0]); }),
-    basicFunction("sin", [](auto d) { return std::sin(d[0]); }),
-    basicOperator("+", -4, [](auto d) { return d[0] + d[1]; }),
-    basicOperator("-", -4, [](auto d) { return d[0] - d[1]; }),
-    basicOperator("*", -3, [](auto d) { return d[0] * d[1]; }),
-    basicOperator("/", -3, [](auto d) { return d[0] / d[1]; }),
-    basicOperator("^", -2, [](auto d) { return std::pow(d[0], d[1]); }),
+    basicFunction("sqrt", [](auto& d) { return sqrt(d[0]); }),
+    complexFunction("rootn", 2, [](auto& d) { 
+        mpf_class root = nthRoot(d[0], (mpz_class) (d[1] * 1000));
+        mpf_class result;
+        mpf_pow_ui(result.get_mpf_t(), root.get_mpf_t(), 1000);
+        return result;
+    }),
+    /*basicFunction("sin", [](auto& d) { return std::sin(d[0]); }),
+    basicFunction("cos", [](auto& d) { return std::cos(d[0]); }),
+    basicFunction("tan", [](auto& d) { return std::tan(d[0]); }),*/
+    basicOperator("+", -4, [](auto& d) { return d[0] + d[1]; }),
+    basicOperator("-", -4, [](auto& d) { return d[0] - d[1]; }),
+    basicOperator("*", -3, [](auto& d) { return d[0] * d[1]; }),
+    basicOperator("/", -3, [](auto& d) { return d[0] / d[1]; }),
+    basicOperator("^", -2, [](auto& d) { return d[0] + d[1]; }),
 };
 
 static const std::vector<std::string> operatorKeys = getMapKeys(operators);
@@ -112,7 +125,7 @@ bool isFunction(ItemType& type) {
 std::string Calculator::GetFormattedLine(int index) { 
     InputLine line = *inputs.at(index);
     if (line.type == InputLineType::Expression) {
-        return std::to_string(EvaluatePostfix(line.postfix));
+        return EvaluatePostfix(line.postfix).get_str(printExp, 10, 0);
     }
     std::string output{ "" };
     if (line.type != InputLineType::Expression) {
@@ -141,7 +154,7 @@ std::string Calculator::GetFormattedLine(int index) {
             break;
         case ItemType::Operand:
         case ItemType::OperandSymbol:
-            output += std::to_string(item.value);
+            output += item.value.get_str(printExp);
             break;
         }
         output += " ";
@@ -293,7 +306,8 @@ void Calculator::ParseLine(const std::string& str, int lineIndex) {
         CalcOperator op{};
         op.type = OpType::OOther;
         if (isdigit(it) || it == '.') { // parse number if there is one
-            double operand{ 0 };
+            mpf_class operand{ 0 };
+            operand.set_prec(64);
             bool leftside{ true };
             int precision = -1;
             while (i < righthand.size()) {
@@ -465,7 +479,7 @@ std::deque<PostfixItem> Calculator::GetExpandedPostfix(std::deque<PostfixItem> i
     return GetExpandedPostfix(items, temp);
 }
 
-double Calculator::EvaluatePostfix(std::deque<PostfixItem> items, std::set<std::string>& processedIdentifiers, std::map<std::string, double>& calculatedVariables) {
+mpf_class Calculator::EvaluatePostfix(std::deque<PostfixItem> items, std::set<std::string>& processedIdentifiers, std::map<std::string, mpf_class>& calculatedVariables) {
     std::set<std::string> temp{};
     items = GetExpandedPostfix(items, temp);
     for (PostfixItem& item : items) {
@@ -504,14 +518,14 @@ double Calculator::EvaluatePostfix(std::deque<PostfixItem> items, std::set<std::
             if (i < argCount) {
                 plError("Wrong number of arguments for an operator/function");
             }
-            std::vector<double> arguments{};
+            std::vector<mpf_class> arguments{};
             for (size_t j{ i - argCount }; j < i; ++j) {
                 if (items[j].type != ItemType::Operand) {
                     plError("Wrong number of arguments for an operator/function");
                 }
                 arguments.push_back(items[j].value);
             }
-            double result = operators.at(items[i].name).function(arguments);
+            mpf_class result = operators.at(items[i].name).function(arguments);
             items.insert(items.begin() + i + 1, PostfixItem{ ItemType::Operand, "", result });
             items.erase(items.begin() + i - argCount, items.begin() + i + 1);
             i -= argCount;
@@ -525,8 +539,8 @@ double Calculator::EvaluatePostfix(std::deque<PostfixItem> items, std::set<std::
     return items[0].value;
 }
 
-double Calculator::EvaluatePostfix(std::deque<PostfixItem> items) {
+mpf_class Calculator::EvaluatePostfix(std::deque<PostfixItem> items) {
     std::set<std::string> temp1{};
-    std::map<std::string, double> temp2{};
+    std::map<std::string, mpf_class> temp2{};
     return EvaluatePostfix(items, temp1, temp2);
 }
